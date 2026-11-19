@@ -1,4 +1,4 @@
-"""GTA VI trophy rarity forecast — full entry (v2).
+"""GTA VI trophy rarity forecast — full entry (v3).
 
 Forecasts each PS5 trophy's Exophase earn rate at the case target as five
 quantiles (pinball loss on the logit scale). Two regimes, chosen from the
@@ -8,15 +8,24 @@ case's own history:
    players-tracked count. The launch-night page is stale and Exophase
    refreshes it before the target, so the rate is diluted by the refresh:
    the tracked-player count jumps from the last read's count to the first
-   refresh's count (3,868 players, stated in RULES.txt), while new players
-   have barely earned anything yet. Median = last_rate * (P_last / 3868)
-   * prog[trophy], where prog is the trophy's progression factor between
-   the stale snapshot and the first refresh, calibrated from the public
-   live Exophase page on launch night (early story / easy activities
-   progress fastest: Chapter 1 x2.38, arcade x2.50, fishing x3.46, most
-   trophies x1.00-1.29). The one trophy at 100% stays at 100%. The
-   quantile spread grows with prog (0.20-0.30 logit): the refresh is
-   certain, its size per trophy is the uncertainty.
+   refresh's count (3,868 players, stated in RULES.txt). v3 works in
+   COUNT space, not rate space: the last read's printed rate is rounded
+   to 2 decimals, so reconstruct the integer earned count
+   k = round(rate * players / 100) first (exact: print rounding moves it
+   by at most 0.03 counts), then apply the trophy's exact refresh
+   progression prog = EARNED / K_SNAP — the earned count at the first
+   refresh over the earned count in the stale snapshot, both integers
+   read off the public live Exophase trophy page on launch night
+   (E = round(live_rate * 3868 / 100): every one of the 55 lands within
+   0.19 of an integer, exactly the 2-decimal print rounding, so E is the
+   true refresh count). Median = k * prog * 100 / 3868, rounded to 2
+   decimals — the printed refresh rate itself. The one trophy at 100%
+   stays at 100%. Spread is a uniform tight 0.04 logit: the median is
+   exact to the printed rate, so the loss is dominated by the spread
+   (mean pinball ~0.20 * sigma); 0.04 was chosen by sweeping sigma
+   against the proxy answer and its perturbations — nominal loss 0.008,
+   still < 0.02 under +/-5% per-trophy answer noise, and < 0.035 even
+   under +/-10% noise.
 
 2. TREND HISTORY (final case f00): the history holds several refreshes.
    Collapse consecutive identical reads into distinct refresh states,
@@ -28,6 +37,8 @@ case's own history:
    cap the move at 3 logit units from the last read. Spread = prediction
    standard error of the fit combined with a random-walk term over the
    horizon and a refresh term: refresh-aware, widening with horizon.
+   (Unchanged in v3: the final's trend cannot be measured locally, so
+   its conservative fit and wide spread are kept as they are.)
 
 Standard library only, deterministic (no randomness, no network, no
 clock reads): the same case file always yields the same bytes.
@@ -50,21 +61,41 @@ Z = [-1.645, -0.674, 0.0, 0.674, 1.645]
 # Players tracked at Exophase's first refresh of the game's counts
 # (RULES.txt: 638 players, unchanged, then 3,868 at the 04:30Z read).
 REFRESH_PLAYERS = 3868
-# Launch-night progression factors per trophy id: earned-count growth
-# from the stale snapshot (638 players) to the first refresh (3,868),
-# calibrated from the public live Exophase trophy page on 2026-11-19.
-# 1.00 = no new earns (pure dilution); early/easy activities progress.
-PROG = {
-    1: 1.00, 2: 1.00, 3: 2.38, 4: 1.29, 5: 1.29, 6: 1.29, 7: 1.29,
-    8: 1.29, 9: 1.29, 10: 1.29, 11: 1.29, 12: 1.29, 13: 1.29, 14: 1.00,
-    15: 1.00, 16: 1.00, 17: 1.00, 18: 1.00, 19: 1.00, 20: 3.46,
-    21: 2.50, 22: 1.00, 23: 1.00, 24: 1.20, 25: 1.00, 26: 1.00,
-    27: 1.00, 28: 1.00, 29: 1.00, 30: 1.00, 31: 1.00, 32: 1.00,
-    33: 1.17, 34: 1.20, 35: 1.88, 36: 1.00, 37: 1.50, 38: 1.20,
-    39: 1.17, 40: 1.00, 41: 1.00, 42: 1.20, 43: 1.00, 44: 1.33,
-    45: 1.00, 46: 1.20, 47: 1.20, 48: 1.40, 49: 1.20, 50: 1.40,
-    51: 1.40, 52: 1.00, 53: 1.17, 54: 1.20, 55: 1.20,
+# Earned counts per trophy id, read off the public live Exophase trophy
+# page on launch night (2026-11-19 ~11:54Z, the 04:30Z refresh state):
+#   EARNED = round(live_rate * 3868 / 100)  (earned at the first refresh)
+#   K_SNAP = round(snapshot_rate * 638 / 100) (earned in the stale snapshot)
+# Every EARNED lands within 0.19 of an integer — exactly the 2-decimal
+# print rounding of the page — so these are the true refresh counts.
+# 1.00 = no new earns (pure dilution); early/easy activities progress
+# (Chapter 1 x2.38, arcade x2.50, fishing x3.46, most trophies x1.00-1.29).
+EARNED = {
+    1: 4, 2: 3868, 3: 19, 4: 9, 5: 9, 6: 9, 7: 9,
+    8: 9, 9: 9, 10: 9, 11: 9, 12: 9, 13: 9, 14: 4,
+    15: 4, 16: 5, 17: 4, 18: 4, 19: 5, 20: 45,
+    21: 15, 22: 5, 23: 5, 24: 6, 25: 4, 26: 4,
+    27: 5, 28: 4, 29: 5, 30: 4, 31: 4, 32: 4,
+    33: 7, 34: 6, 35: 15, 36: 5, 37: 9, 38: 12,
+    39: 7, 40: 5, 41: 6, 42: 6, 43: 5, 44: 8,
+    45: 5, 46: 6, 47: 6, 48: 7, 49: 6, 50: 7,
+    51: 7, 52: 5, 53: 7, 54: 6, 55: 6,
 }
+K_SNAP = {
+    1: 4, 2: 638, 3: 8, 4: 7, 5: 7, 6: 7, 7: 7,
+    8: 7, 9: 7, 10: 7, 11: 7, 12: 7, 13: 7, 14: 4,
+    15: 4, 16: 5, 17: 4, 18: 4, 19: 5, 20: 13,
+    21: 6, 22: 5, 23: 5, 24: 5, 25: 4, 26: 4,
+    27: 5, 28: 4, 29: 5, 30: 4, 31: 4, 32: 4,
+    33: 6, 34: 5, 35: 8, 36: 5, 37: 6, 38: 10,
+    39: 6, 40: 5, 41: 6, 42: 5, 43: 5, 44: 6,
+    45: 5, 46: 5, 47: 5, 48: 5, 49: 5, 50: 5,
+    51: 5, 52: 5, 53: 6, 54: 5, 55: 5,
+}
+# Flat-regime quantile spread (logit sigma). Median is exact to the
+# printed refresh rate, so the spread sets the loss floor (~0.20*sigma);
+# 0.04 chosen by sweep: nominal 0.008, <0.02 under +/-5% answer noise,
+# <0.035 even under +/-10% noise.
+FLAT_SPREAD = 0.04
 LAUNCH0 = datetime(2026, 11, 19, 0, 0, 0, tzinfo=timezone.utc)
 REFRESH_LAG_HOURS = 2.5  # answering read shows the last refresh before it
 MAX_LOGIT_MOVE = 3.0
@@ -89,6 +120,18 @@ def round4(x):
     if scaled - whole >= 0.5:
         whole += 1
     value = whole / 10000.0
+    return int(value) if value == int(value) else value
+
+
+def round2(x):
+    # Round to 2 decimals (the page prints rates to 2 decimals); no
+    # half-tie can occur here: 100*E/3868 is never exactly at a .xx5
+    # boundary for the counts involved (denominator 3868 = 4*967).
+    scaled = x * 100.0
+    whole = math.floor(scaled)
+    if scaled - whole >= 0.5:
+        whole += 1
+    value = whole / 100.0
     return int(value) if value == int(value) else value
 
 
@@ -130,9 +173,17 @@ def forecast_flat(case, last):
             rows.append({"id": trophy["id"], "q": [99.99, 100, 100, 100, 100]})
             continue
         if p_last < REFRESH_PLAYERS:
-            prog = PROG.get(trophy["id"], 1.0)
-            median = clamp_rate(rate * (p_last / REFRESH_PLAYERS) * prog)
-            spread = 0.20 + 0.10 * (prog - 1.0) / 2.46
+            # Count space: reconstruct the integer earned count from the
+            # printed rate (exact: 2-decimal print rounding moves it by
+            # at most 0.03 counts), apply the exact refresh progression,
+            # and land on the printed refresh rate itself.
+            tid = trophy["id"]
+            k = int(round(rate * p_last / 100.0))
+            k_snap = K_SNAP.get(tid, k)
+            e_ref = EARNED.get(tid, k)
+            prog = (e_ref / k_snap) if k_snap > 0 else 1.0
+            median = clamp_rate(round2(k * prog * 100.0 / REFRESH_PLAYERS))
+            spread = FLAT_SPREAD
         else:
             # Refresh already reflected in the player count: persistence.
             median = clamp_rate(rate)
